@@ -26,10 +26,13 @@ namespace vanet_function_GC
             //Declaring variables.
             DataRowCollection currentRoutes;
             HttpClient client = new HttpClient();
-            int sysMinDistance = Convert.ToInt32(Environment.GetEnvironmentVariable("minDistanceDetection"));
-            int secondsToDestination = Convert.ToInt32(Environment.GetEnvironmentVariable("secondsToDestination"));
             List<GpsPoint> collisionList = new List<GpsPoint>();
             GpsPoint currentUserSP;
+
+            //Environment Variables
+            int sysMinDistance = Convert.ToInt32(Environment.GetEnvironmentVariable("minDistanceDetection"));
+            int secondsToDestination = Convert.ToInt32(Environment.GetEnvironmentVariable("secondsToDestination"));
+            string googleApiKey = Environment.GetEnvironmentVariable("googleApiKey");
 
             log.LogInformation("GetVanetEvents HTTP trigger function processed a request.");
 
@@ -46,7 +49,7 @@ namespace vanet_function_GC
 
             try
             {
-                //Eliminamos la información de ruta anterior.
+                //Eliminamos la información de ruta anterior, solo se almacena la mas reciente.
                 DbConnection.QueryDatabase($"DELETE FROM userroutes where userid=(SELECT userid FROM userprofile WHERE username='{data?.username}')");
                 
                 //Almacenamos la data de la ruta del usuario.
@@ -59,6 +62,7 @@ namespace vanet_function_GC
                 //Obtener las rutas de los demas usuarios del sistema.
                 currentRoutes = DbConnection.QueryDatabase($"SELECT currentroute, speed FROM userroutes WHERE userid!=(SELECT userid FROM userprofile WHERE username='{data?.username}');");
                 
+                //Almacenamos información de coducta de el usuario.
                 DbConnection.QueryDatabase($@"insert into drivebehavior (latitude,longitude,speed,eventTime,userid) 
                 values ({currentUserSP.Latitude},{currentUserSP.Longitude},{data?.speed},{data?.eventime},(SELECT userid FROM userprofile WHERE username='{data?.username}'))");
             }
@@ -67,10 +71,9 @@ namespace vanet_function_GC
                 return new BadRequestObjectResult("Something went wrong while trying to access the database.");
             }
 
-            // INICIO ALGORITMO
-            currentUserSP = new GpsPoint(Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lat),
-                                                        Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lng));
-            double currentUserSpeed = data?.speed;
+            // Algoritmo de colisiones
+            currentUserSP = new GpsPoint(Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lat),Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lng));
+
             foreach (DataRow row in currentRoutes)
                 {
                     dynamic externalRoute = JsonConvert.DeserializeObject(row["currentroute"].ToString());
@@ -84,9 +87,9 @@ namespace vanet_function_GC
                         GpsPoint collisionPoint = Polyline.getCollisionPoint(data,externalRoute);
                         if (collisionPoint!=null)
                         {
-                            var response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={currentUserSP.Latitude},{currentUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key=AIzaSyAPwuMKY79H9rOvbK-IbNqp6k-pvWXth-o", null);
+                            var response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={currentUserSP.Latitude},{currentUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key={googleApiKey}", null);
                             dynamic apiResponseCU = JsonConvert.DeserializeObject(await response.Content.ReadAsStringAsync());
-                            response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={externaltUserSP.Latitude},{externaltUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key=AIzaSyAPwuMKY79H9rOvbK-IbNqp6k-pvWXth-o", null);
+                            response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={externaltUserSP.Latitude},{externaltUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key={googleApiKey}", null);
                             dynamic apiResponseEU = JsonConvert.DeserializeObject(await response.Content.ReadAsStringAsync());
                             int timeCU = apiResponseCU?.rows[0].elements[0].duration.value;
                             int timeEU = apiResponseEU?.rows[0].elements[0].duration.value;
