@@ -11,6 +11,7 @@ using vanet_function_GC.Utilities;
 using System.Collections.Generic;
 using System.Data;
 using vanet_function_GC.GeoLocation;
+using System.Data.SqlClient;
 
 namespace vanet_function_GC
 {
@@ -30,7 +31,7 @@ namespace vanet_function_GC
             dynamic data = JsonConvert.DeserializeObject(requestBody);
 
             //Comprobamos que el usuario existe en primer lugar.
-            if(DbConnection.QueryDatabase($"SELECT username FROM userprofile WHERE username='{data?.username}'").Count<=0){
+            if(DbConnection.QueryDatabase($"SELECT username FROM userprofile WHERE username=@userName",new SqlParameter("userName", data?.username.ToString())).Count<=0){
                 return new BadRequestObjectResult("User must be registered first to use this function.");
             }
 

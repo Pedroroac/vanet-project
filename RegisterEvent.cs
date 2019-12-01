@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using vanet_function_GC.Utilities;
+using System.Data.SqlClient;
 
 namespace vanet_function_GC
 {
@@ -24,14 +25,19 @@ namespace vanet_function_GC
             dynamic data = JsonConvert.DeserializeObject(requestBody);
 
             //Comprobamos que el usuario existe en primer lugar.
-            if(DbConnection.QueryDatabase($"SELECT username FROM userprofile WHERE username='{data?.username}'").Count<=0){
+            if(DbConnection.QueryDatabase($"SELECT username FROM userprofile WHERE username=@userName",new SqlParameter("userName", data?.username.ToString())).Count<=0){
                 return new BadRequestObjectResult("User must be registered first to use this function.");
             }
 
             try 
             {
                 DbConnection.QueryDatabase($@"insert into userevents(eventTime, locationName, latitude, longitude, userid) 
-                values({data?.eventTime},'{data?.locationName}',{data?.latitude},{data?.longitude},(SELECT userid FROM userprofile WHERE username='{data?.username}'))");
+                values(@eventime,@locationName,@latitude,@longitude,(SELECT userid FROM userprofile WHERE username=@username))",
+                new SqlParameter("eventime", data?.eventTime.ToString()),
+                new SqlParameter("locationName", data?.locationName.ToString()),
+                new SqlParameter("latitude", data?.latitude.ToString()),
+                new SqlParameter("longitude", data?.longitude.ToString()),
+                new SqlParameter("username", data?.username.ToString()));
                 
                 return new OkObjectResult(requestBody);
             }

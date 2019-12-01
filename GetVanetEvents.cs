@@ -12,6 +12,7 @@ using vanet_function_GC.GeoLocation;
 using vanet_function_GC.Utilities;
 using System.Net.Http;
 using System.Collections.Generic;
+using System.Data.SqlClient;
 
 namespace vanet_function_GC
 {
@@ -22,7 +23,7 @@ namespace vanet_function_GC
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
             ILogger log)
         {
-            
+
             //Declaring variables.
             DataRowCollection currentRoutes;
             HttpClient client = new HttpClient();
@@ -40,31 +41,37 @@ namespace vanet_function_GC
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             dynamic data = JsonConvert.DeserializeObject(requestBody);
 
-            //Comprobamos que el usuario existe en primer lugar.
-            if(DbConnection.QueryDatabase($"SELECT username FROM userprofile WHERE username='{data?.username}'").Count<=0){
-                return new BadRequestObjectResult("User must be registered first to use this function.");
-            }
-            
-            currentUserSP = new GpsPoint(Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lat),Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lng));
+            currentUserSP = new GpsPoint(Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lat), Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lng));
 
             try
             {
+                //Comprobamos que el usuario existe en primer lugar.
+                if (DbConnection.QueryDatabase($"SELECT username FROM userprofile WHERE username=@userName", new SqlParameter("userName", data?.username.ToString())).Count <= 0)
+                {
+                    return new BadRequestObjectResult("User must be registered first to use this function.");
+                }
                 //Eliminamos la información de ruta anterior, solo se almacena la mas reciente.
-                DbConnection.QueryDatabase($"DELETE FROM userroutes where userid=(SELECT userid FROM userprofile WHERE username='{data?.username}')");
-                
+                DbConnection.QueryDatabase($"DELETE FROM userroutes where userid=(SELECT userid FROM userprofile WHERE username=@userName)", new SqlParameter("userName", data?.username.ToString()));
+
                 //Almacenamos la data de la ruta del usuario.
-                DbConnection.QueryDatabase($@"insert into userroutes (currentroute,speed,eventTime,userid) values (
-                    '{data?.route}',
-                    {data?.speed},
-                    {data?.eventime},
-                    (SELECT userid FROM userprofile WHERE username='{data?.username}'))");
+                DbConnection.QueryDatabase($@"insert into userroutes (currentroute,speed,eventTime,userid) values (@route, @speed, @eventTime, (SELECT userid FROM userprofile WHERE username=@userName))",
+                    new SqlParameter("route", data?.route.ToString()),
+                    new SqlParameter("speed", data?.speed.ToString()),
+                    new SqlParameter("eventTime", data?.eventime.ToString()),
+                    new SqlParameter("userName", data?.username.ToString()));
 
                 //Obtener las rutas de los demas usuarios del sistema.
-                currentRoutes = DbConnection.QueryDatabase($"SELECT currentroute, speed FROM userroutes WHERE userid!=(SELECT userid FROM userprofile WHERE username='{data?.username}');");
-                
+                currentRoutes = DbConnection.QueryDatabase($"SELECT currentroute, speed FROM userroutes WHERE userid!=(SELECT userid FROM userprofile WHERE username=@userName);",
+                new SqlParameter("userName", data?.username.ToString()));
+
                 //Almacenamos información de coducta de el usuario.
                 DbConnection.QueryDatabase($@"insert into drivebehavior (latitude,longitude,speed,eventTime,userid) 
-                values ({currentUserSP.Latitude},{currentUserSP.Longitude},{data?.speed},{data?.eventime},(SELECT userid FROM userprofile WHERE username='{data?.username}'))");
+                values (@latitude,@longitude,@speed,@eventTime,(SELECT userid FROM userprofile WHERE username=@userName))",
+                    new SqlParameter("latitude", currentUserSP.Latitude.ToString()),
+                    new SqlParameter("longitude", currentUserSP.Longitude.ToString()),
+                    new SqlParameter("speed", data?.speed.ToString()),
+                    new SqlParameter("eventTime", data?.eventime.ToString()),
+                    new SqlParameter("userName", data?.username.ToString()));
             }
             catch
             {
@@ -72,43 +79,44 @@ namespace vanet_function_GC
             }
 
             // Algoritmo de colisiones
-            currentUserSP = new GpsPoint(Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lat),Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lng));
+            currentUserSP = new GpsPoint(Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lat), Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lng));
 
             foreach (DataRow row in currentRoutes)
-                {
-                    dynamic externalRoute = JsonConvert.DeserializeObject(row["currentroute"].ToString());
-                    GpsPoint externaltUserSP = new GpsPoint(Convert.ToDouble(externalRoute?.routes[0].legs[0].start_location.lat),
-                                                        Convert.ToDouble(externalRoute?.routes[0].legs[0].start_location.lng));
-                    double externaltUserSpeed = Convert.ToDouble(row["speed"]);
-                    double distanceUsers = externaltUserSP.GetDistanceTo(currentUserSP);
-                    
-                    if(distanceUsers<=sysMinDistance)
-                    {
-                        GpsPoint collisionPoint = Polyline.getCollisionPoint(data,externalRoute);
-                        if (collisionPoint!=null)
-                        {
-                            var response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={currentUserSP.Latitude},{currentUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key={googleApiKey}", null);
-                            dynamic apiResponseCU = JsonConvert.DeserializeObject(await response.Content.ReadAsStringAsync());
-                            response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={externaltUserSP.Latitude},{externaltUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key={googleApiKey}", null);
-                            dynamic apiResponseEU = JsonConvert.DeserializeObject(await response.Content.ReadAsStringAsync());
-                            int timeCU = apiResponseCU?.rows[0].elements[0].duration.value;
-                            int timeEU = apiResponseEU?.rows[0].elements[0].duration.value;
-                            if(Math.Abs(timeCU-timeEU)<=secondsToDestination){
-                                collisionList.Add(collisionPoint);
-                            }
-                        }
-                        
-                    }             
-                }
-            if(collisionList.Count>0)
             {
-                return new OkObjectResult(JsonConvert.SerializeObject(new GetVanetEventsResponse(collisionList,"Possible collissions detected.")));
+                dynamic externalRoute = JsonConvert.DeserializeObject(row["currentroute"].ToString());
+                GpsPoint externaltUserSP = new GpsPoint(Convert.ToDouble(externalRoute?.routes[0].legs[0].start_location.lat),
+                                                    Convert.ToDouble(externalRoute?.routes[0].legs[0].start_location.lng));
+                double externaltUserSpeed = Convert.ToDouble(row["speed"]);
+                double distanceUsers = externaltUserSP.GetDistanceTo(currentUserSP);
+
+                if (distanceUsers <= sysMinDistance)
+                {
+                    GpsPoint collisionPoint = Polyline.getCollisionPoint(data, externalRoute);
+                    if (collisionPoint != null)
+                    {
+                        var response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={currentUserSP.Latitude},{currentUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key={googleApiKey}", null);
+                        dynamic apiResponseCU = JsonConvert.DeserializeObject(await response.Content.ReadAsStringAsync());
+                        response = await client.PostAsync($@"https://maps.googleapis.com/maps/api/distancematrix/json?origins={externaltUserSP.Latitude},{externaltUserSP.Longitude}&destinations={collisionPoint.Latitude},{collisionPoint.Longitude}&key={googleApiKey}", null);
+                        dynamic apiResponseEU = JsonConvert.DeserializeObject(await response.Content.ReadAsStringAsync());
+                        int timeCU = apiResponseCU?.rows[0].elements[0].duration.value;
+                        int timeEU = apiResponseEU?.rows[0].elements[0].duration.value;
+                        if (Math.Abs(timeCU - timeEU) <= secondsToDestination)
+                        {
+                            collisionList.Add(collisionPoint);
+                        }
+                    }
+
+                }
+            }
+            if (collisionList.Count > 0)
+            {
+                return new OkObjectResult(JsonConvert.SerializeObject(new GetVanetEventsResponse(collisionList, "Possible collissions detected.")));
             }
             else
             {
-                return new OkObjectResult(JsonConvert.SerializeObject(new GetVanetEventsResponse(collisionList,"No collissions detected.")));
+                return new OkObjectResult(JsonConvert.SerializeObject(new GetVanetEventsResponse(collisionList, "No collissions detected.")));
             }
-                
+
         }
     }
 }
