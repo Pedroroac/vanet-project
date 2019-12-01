@@ -43,7 +43,6 @@ namespace vanet_function_GC
             }
             
             currentUserSP = new GpsPoint(Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lat),Convert.ToDouble(data?.route.routes[0].legs[0].start_location.lng));
-            //string speeding = "0";
 
             try
             {
@@ -60,8 +59,8 @@ namespace vanet_function_GC
                 //Obtener las rutas de los demas usuarios del sistema.
                 currentRoutes = DbConnection.QueryDatabase($"SELECT currentroute, speed FROM userroutes WHERE userid!=(SELECT userid FROM userprofile WHERE username='{data?.username}');");
                 
-                DbConnection.QueryDatabase($@"insert into drivebehavior (latitude,longitude,speed,speeding,eventTime,userid) 
-                values ({currentUserSP.Latitude},{currentUserSP.Longitude},{data?.speed},{speeding},{data?.eventime},(SELECT userid FROM userprofile WHERE username='{data?.username}'))");
+                DbConnection.QueryDatabase($@"insert into drivebehavior (latitude,longitude,speed,eventTime,userid) 
+                values ({currentUserSP.Latitude},{currentUserSP.Longitude},{data?.speed},{data?.eventime},(SELECT userid FROM userprofile WHERE username='{data?.username}'))");
             }
             catch
             {
