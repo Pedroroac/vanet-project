@@ -34,6 +34,7 @@ namespace vanet_function_GC
             int sysMinDistance = Convert.ToInt32(Environment.GetEnvironmentVariable("minDistanceDetection"));
             int secondsToDestination = Convert.ToInt32(Environment.GetEnvironmentVariable("secondsToDestination"));
             string googleApiKey = Environment.GetEnvironmentVariable("googleApiKey");
+            long minTimeSinceLastUpdate = Convert.ToInt64(Environment.GetEnvironmentVariable("timeSinceLastUpdate"));
 
             log.LogInformation("GetVanetEvents HTTP trigger function processed a request.");
 
@@ -61,7 +62,7 @@ namespace vanet_function_GC
                     new SqlParameter("userName", data?.username.ToString()));
 
                 //Obtener las rutas de los demas usuarios del sistema.
-                currentRoutes = DbConnection.QueryDatabase($"SELECT currentroute, speed FROM userroutes WHERE userid!=(SELECT userid FROM userprofile WHERE username=@userName);",
+                currentRoutes = DbConnection.QueryDatabase($"SELECT currentroute, speed, eventTime FROM userroutes WHERE userid!=(SELECT userid FROM userprofile WHERE username=@userName);",
                 new SqlParameter("userName", data?.username.ToString()));
 
                 //Almacenamos información de coducta de el usuario.
@@ -87,9 +88,10 @@ namespace vanet_function_GC
                 GpsPoint externaltUserSP = new GpsPoint(Convert.ToDouble(externalRoute?.routes[0].legs[0].start_location.lat),
                                                     Convert.ToDouble(externalRoute?.routes[0].legs[0].start_location.lng));
                 double externaltUserSpeed = Convert.ToDouble(row["speed"]);
+                var timeSinceLastUpdateEU = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()-Convert.ToInt64(row["eventTime"]);
                 double distanceUsers = externaltUserSP.GetDistanceTo(currentUserSP);
 
-                if (distanceUsers <= sysMinDistance)
+                if (distanceUsers <= sysMinDistance && timeSinceLastUpdateEU<=minTimeSinceLastUpdate)
                 {
                     GpsPoint collisionPoint = Polyline.getCollisionPoint(data, externalRoute);
                     if (collisionPoint != null)
